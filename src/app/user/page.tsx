@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-export default async function EmployeeDashboard() {
+export default async function UserDashboard() {
   const supabase = await createClient();
 
   const {
@@ -78,8 +78,8 @@ export default async function EmployeeDashboard() {
     .limit(1)
     .single();
 
-  const tierName = currentTier?.tiers?.name ?? "Basic";
-  const maxLoan = currentTier?.tiers?.max_loan ?? 5000;
+  const tierName = currentTier?.tiers?.name ?? "Tier 1";
+  const maxLoan = currentTier?.tiers?.max_loan ?? 700;
 
   return (
     <div className="space-y-6">
@@ -167,7 +167,7 @@ export default async function EmployeeDashboard() {
               Submit a new loan application
             </p>
             <Button asChild className="mt-4" size="sm">
-              <Link href="/employee/apply">Apply now</Link>
+              <Link href="/user/apply">Apply now</Link>
             </Button>
           </CardContent>
         </Card>
@@ -179,7 +179,7 @@ export default async function EmployeeDashboard() {
               Upload your ID and payslip
             </p>
             <Button asChild className="mt-4" size="sm" variant="outline">
-              <Link href="/employee/documents">Upload</Link>
+              <Link href="/user/documents">Upload</Link>
             </Button>
           </CardContent>
         </Card>
@@ -191,7 +191,7 @@ export default async function EmployeeDashboard() {
               View your loan history and status
             </p>
             <Button asChild className="mt-4" size="sm" variant="outline">
-              <Link href="/employee/loans">View loans</Link>
+              <Link href="/user/loans">View loans</Link>
             </Button>
           </CardContent>
         </Card>

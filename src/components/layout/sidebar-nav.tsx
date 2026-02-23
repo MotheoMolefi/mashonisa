@@ -42,7 +42,7 @@ export function SidebarNav({ items, title }: SidebarNavProps) {
         {items.map((item) => {
           const isActive =
             pathname === item.href ||
-            (item.href !== "/employee" &&
+            (item.href !== "/user" &&
               item.href !== "/admin" &&
               pathname.startsWith(item.href));
           return (

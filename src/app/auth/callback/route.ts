@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/employee";
+  const next = searchParams.get("next") ?? "/user";
 
   if (code) {
     const supabase = await createClient();
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
           .eq("id", user.id)
           .single();
 
-        const redirectTo = profile?.role === "admin" ? "/admin" : "/employee";
+        const redirectTo = profile?.role === "admin" ? "/admin" : "/user";
         return NextResponse.redirect(`${origin}${redirectTo}`);
       }
 

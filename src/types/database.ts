@@ -1,4 +1,4 @@
-export type UserRole = "employee" | "admin";
+export type UserRole = "user" | "admin";
 
 export type DocumentType =
   | "id_doc"
@@ -97,7 +97,7 @@ export interface Repayment {
 export interface Tier {
   id: string;
   name: string;
-  min_months_employed: number;
+  min_successful_repayments: number;
   max_loan: number;
   interest_rate: number;
   rules: Record<string, unknown> | null;

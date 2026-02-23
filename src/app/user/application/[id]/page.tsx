@@ -133,7 +133,7 @@ export default async function ApplicationDetailPage({
               </p>
             )}
             <Button asChild className="mt-4" size="sm">
-              <Link href="/employee/apply">Apply again</Link>
+              <Link href="/user/apply">Apply again</Link>
             </Button>
           </CardContent>
         </Card>
@@ -233,7 +233,7 @@ export default async function ApplicationDetailPage({
       {isApproved && loanId && (
         <div className="flex gap-2">
           <Button asChild>
-            <Link href={`/employee/loans/${loanId}`}>
+            <Link href={`/user/loans/${loanId}`}>
               View Loan & Repayment Schedule
             </Link>
           </Button>

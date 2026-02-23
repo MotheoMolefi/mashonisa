@@ -53,7 +53,7 @@ export default function LoginPage() {
         .eq("id", user.id)
         .single();
 
-      router.push(profile?.role === "admin" ? "/admin" : "/employee");
+      router.push(profile?.role === "admin" ? "/admin" : "/user");
       router.refresh();
     }
   }

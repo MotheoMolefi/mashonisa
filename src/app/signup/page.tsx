@@ -24,71 +24,40 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", "", "", ""]);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
 
   async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    const fullName = formData.get("full_name") as string;
+    const name = formData.get("full_name") as string;
     const emailValue = formData.get("email") as string;
-    const phone = formData.get("phone") as string;
+    const phoneValue = formData.get("phone") as string;
     const password = formData.get("password") as string;
 
     const supabase = createClient();
 
-    // Step 1: Create the account (no confirmation email since it's disabled)
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email: emailValue,
       password,
       options: {
         data: {
-          full_name: fullName,
-          phone: phone,
+          full_name: name,
+          phone: phoneValue,
         },
       },
     });
 
-    if (signUpError) {
-      toast.error(signUpError.message);
-      setLoading(false);
-      return;
-    }
-
-    // While we still have a session from signUp, update the profile directly
-    // (the DB trigger may not capture metadata reliably)
-    const {
-      data: { user: newUser },
-    } = await supabase.auth.getUser();
-
-    if (newUser) {
-      await supabase
-        .from("profiles")
-        .update({ full_name: fullName, phone: phone })
-        .eq("id", newUser.id);
-    }
-
-    // Sign out immediately so user isn't auto-logged in before OTP verification
-    await supabase.auth.signOut();
-
-    // Step 2: Send OTP via the /auth/v1/otp endpoint (30/hr rate limit)
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: emailValue,
-      options: {
-        shouldCreateUser: false,
-      },
-    });
-
-    if (otpError) {
-      toast.error(otpError.message);
+    if (error) {
+      toast.error(error.message);
       setLoading(false);
       return;
     }
 
     setEmail(emailValue);
-    setFullName(fullName);
-    setPhone(phone);
+    setFullName(name);
+    setPhone(phoneValue);
     setStep("verify");
     toast.success("Check your email for the verification code!");
     setLoading(false);
@@ -96,28 +65,25 @@ export default function SignupPage() {
 
   function handleOtpChange(index: number, value: string) {
     if (value.length > 1) {
-      // Handle paste of full code
-      const digits = value.replace(/\D/g, "").slice(0, 8).split("");
+      const digits = value.replace(/\D/g, "").slice(0, 6).split("");
       const newOtp = [...otp];
       digits.forEach((d, i) => {
-        if (index + i < 8) newOtp[index + i] = d;
+        if (index + i < 6) newOtp[index + i] = d;
       });
       setOtp(newOtp);
-      // Focus last filled input or the next empty one
-      const nextIndex = Math.min(index + digits.length, 7);
+      const nextIndex = Math.min(index + digits.length, 5);
       const nextInput = document.getElementById(`otp-${nextIndex}`);
       nextInput?.focus();
       return;
     }
 
-    if (value && !/^\d$/.test(value)) return; // Only allow digits
+    if (value && !/^\d$/.test(value)) return;
 
     const newOtp = [...otp];
     newOtp[index] = value;
     setOtp(newOtp);
 
-    // Auto-focus next input
-    if (value && index < 7) {
+    if (value && index < 5) {
       const nextInput = document.getElementById(`otp-${index + 1}`);
       nextInput?.focus();
     }
@@ -135,8 +101,8 @@ export default function SignupPage() {
 
   async function handleVerify() {
     const code = otp.join("");
-    if (code.length !== 8) {
-      toast.error("Please enter the full 8-digit code.");
+    if (code.length !== 6) {
+      toast.error("Please enter the full 6-digit code.");
       return;
     }
 
@@ -146,12 +112,12 @@ export default function SignupPage() {
     const { error } = await supabase.auth.verifyOtp({
       email,
       token: code,
-      type: "email",
+      type: "signup",
     });
 
     if (error) {
       toast.error(error.message);
-      setOtp(["", "", "", "", "", "", "", ""]);
+      setOtp(["", "", "", "", "", ""]);
       setLoading(false);
       return;
     }
@@ -164,12 +130,12 @@ export default function SignupPage() {
     if (user) {
       await supabase
         .from("profiles")
-        .update({ full_name: fullName, phone: phone })
+        .update({ full_name: fullName, phone })
         .eq("id", user.id);
     }
 
     toast.success("Account verified! Redirecting...");
-    router.push("/employee");
+    router.push("/user");
     router.refresh();
   }
 
@@ -177,11 +143,9 @@ export default function SignupPage() {
     setLoading(true);
     const supabase = createClient();
 
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.resend({
+      type: "signup",
       email,
-      options: {
-        shouldCreateUser: false,
-      },
     });
 
     if (error) {
@@ -189,11 +153,10 @@ export default function SignupPage() {
     } else {
       toast.success("New code sent! Check your email.");
     }
-    setOtp(["", "", "", "", "", "", "", ""]);
+    setOtp(["", "", "", "", "", ""]);
     setLoading(false);
   }
 
-  // Step 1: Signup form
   if (step === "signup") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/40 px-4">
@@ -271,7 +234,6 @@ export default function SignupPage() {
     );
   }
 
-  // Step 2: OTP verification
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/40 px-4">
       <Card className="w-full max-w-md">
@@ -284,7 +246,7 @@ export default function SignupPage() {
           </Link>
           <CardTitle className="text-2xl">Verify your email</CardTitle>
           <CardDescription>
-            We sent an 8-digit code to{" "}
+            We sent a 6-digit code to{" "}
             <span className="font-medium text-foreground">{email}</span>
           </CardDescription>
         </CardHeader>
@@ -296,11 +258,11 @@ export default function SignupPage() {
                 id={`otp-${i}`}
                 type="text"
                 inputMode="numeric"
-                maxLength={i === 0 ? 8 : 1}
+                maxLength={i === 0 ? 6 : 1}
                 value={digit}
                 onChange={(e) => handleOtpChange(i, e.target.value)}
                 onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                className="h-14 w-11 text-center text-xl font-bold"
+                className="h-14 w-12 text-center text-xl font-bold"
                 autoFocus={i === 0}
               />
             ))}
@@ -308,7 +270,7 @@ export default function SignupPage() {
           <Button
             onClick={handleVerify}
             className="w-full"
-            disabled={loading || otp.join("").length !== 8}
+            disabled={loading || otp.join("").length !== 6}
           >
             {loading ? "Verifying..." : "Verify & Continue"}
           </Button>

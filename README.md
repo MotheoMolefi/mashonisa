@@ -69,7 +69,7 @@ src/
 ├── app/
 │   ├── admin/          # Admin dashboard & management
 │   ├── auth/callback/  # Supabase auth callback handler
-│   ├── employee/       # User portal (dashboard, apply, loans, etc.)
+│   ├── user/           # User portal (dashboard, apply, loans, etc.)
 │   ├── login/          # Login page
 │   ├── signup/         # Signup with OTP verification
 │   └── page.tsx        # Landing page
@@ -87,9 +87,9 @@ src/
 
 ## Loan Tiers
 
-| Tier     | Min Months | Max Loan  | Interest Rate |
-|----------|-----------|-----------|---------------|
-| Basic    | 0         | R1,000    | 5.0% p.m.     |
-| Silver   | 3         | R15,000   | 4.0% p.m.     |
-| Gold     | 6         | R30,000   | 3.0% p.m.     |
-| Platinum | 12        | R50,000   | 2.5% p.m.     |
+| Tier   | Requirement              | Max Loan | Interest Rate |
+|--------|--------------------------|----------|---------------|
+| Tier 1 | New borrower             | R700     | 5.0%          |
+| Tier 2 | 1 successful repayment   | R1,000   | 4.5%          |
+| Tier 3 | 3 successful repayments  | R2,000   | 4.0%          |
+| Tier 4 | 5 successful repayments  | R3,000   | 3.5%          |

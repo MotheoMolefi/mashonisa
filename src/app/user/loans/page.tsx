@@ -56,7 +56,7 @@ export default async function LoansPage() {
           <CardContent className="pt-6 text-center">
             <p className="text-muted-foreground">You don&apos;t have any loans yet.</p>
             <Button asChild className="mt-4" size="sm">
-              <Link href="/employee/apply">Apply for a loan</Link>
+              <Link href="/user/apply">Apply for a loan</Link>
             </Button>
           </CardContent>
         </Card>
@@ -95,7 +95,7 @@ export default async function LoansPage() {
                     <TableCell>{loanStatusBadge(loan.status)}</TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/employee/loans/${loan.id}`}>View</Link>
+                        <Link href={`/user/loans/${loan.id}`}>View</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

@@ -56,7 +56,7 @@ export async function updateSession(request: NextRequest) {
 
     if (!profile || profile.role !== "admin") {
       const url = request.nextUrl.clone();
-      url.pathname = "/employee";
+      url.pathname = "/user";
       return NextResponse.redirect(url);
     }
   }
@@ -70,7 +70,7 @@ export async function updateSession(request: NextRequest) {
       .single();
 
     const url = request.nextUrl.clone();
-    url.pathname = profile?.role === "admin" ? "/admin" : "/employee";
+    url.pathname = profile?.role === "admin" ? "/admin" : "/user";
     return NextResponse.redirect(url);
   }
 

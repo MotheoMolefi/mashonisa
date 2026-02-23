@@ -7,7 +7,7 @@
 -- ============================================================
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  role text not null default 'employee' check (role in ('employee', 'admin')),
+  role text not null default 'user' check (role in ('user', 'admin')),
   company_id uuid,
   full_name text not null default '',
   phone text,
@@ -254,7 +254,7 @@ create policy "Admins can update repayments"
 create table if not exists public.tiers (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
-  min_months_employed int not null default 0,
+  min_successful_repayments int not null default 0,
   max_loan numeric not null,
   interest_rate numeric not null,
   rules jsonb
@@ -276,11 +276,11 @@ create policy "Admins can manage tiers"
   );
 
 -- Seed tiers
-insert into public.tiers (name, min_months_employed, max_loan, interest_rate, rules) values
-  ('Basic',    0, 1000,  5.0, '{"consecutive_on_time": 0}'),
-  ('Silver',   3, 15000, 4.0, '{"consecutive_on_time": 3}'),
-  ('Gold',     6, 30000, 3.0, '{"consecutive_on_time": 6}'),
-  ('Platinum', 12, 50000, 2.5, '{"consecutive_on_time": 9}')
+insert into public.tiers (name, min_successful_repayments, max_loan, interest_rate, rules) values
+  ('Tier 1',  0, 700,   5.0, '{"description": "New borrower"}'),
+  ('Tier 2',  1, 1000,  4.5, '{"description": "After 1 successful repayment"}'),
+  ('Tier 3',  3, 2000,  4.0, '{"description": "Higher limit"}'),
+  ('Tier 4',  5, 3000,  3.5, '{"description": "Premium borrower"}')
 on conflict (name) do nothing;
 
 -- 7. USER TIER HISTORY
