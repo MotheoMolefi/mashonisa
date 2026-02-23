@@ -58,6 +58,13 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
+  // If admin tries to access user routes, redirect to admin portal
+  if (user && pathname.startsWith("/user") && role === "admin") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/admin";
+    return NextResponse.redirect(url);
+  }
+
   // If logged in and visiting login/signup, redirect to dashboard
   if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();

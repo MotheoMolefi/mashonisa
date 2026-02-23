@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 
-export default function SettingsPage() {
+export default function AdminSettingsPage() {
   const supabase = createClient();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -81,8 +81,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Manage your account details</p>
+        <h1 className="text-2xl font-bold tracking-tight">Admin Settings</h1>
+        <p className="text-muted-foreground">Manage your admin profile</p>
       </div>
 
       <Card>

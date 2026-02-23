@@ -4,7 +4,6 @@ import { SidebarNav } from "@/components/layout/sidebar-nav";
 
 const userNav = [
   { title: "Dashboard", href: "/user", icon: "📊" },
-  { title: "Upload Documents", href: "/user/documents", icon: "📄" },
   { title: "Apply for Loan", href: "/user/apply", icon: "💰" },
   { title: "My Loans", href: "/user/loans", icon: "📋" },
   { title: "Repayments", href: "/user/repayments", icon: "💳" },

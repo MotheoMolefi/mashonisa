@@ -188,21 +188,13 @@ export default async function ApplicationDetailPage({
                   Disposable Income
                 </span>
                 <p className="font-medium">
-                  R{affordability.disposable_income.toLocaleString()}
+                  R{Number(affordability.disposable_income ?? 0).toLocaleString()}
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground">Max Installment</span>
+                <span className="text-muted-foreground">Total Repayment</span>
                 <p className="font-medium">
-                  R{affordability.max_installment.toFixed(2)}
-                </p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">
-                  Estimated Installment
-                </span>
-                <p className="font-medium">
-                  R{affordability.estimated_installment.toFixed(2)}
+                  R{Number(affordability.total_repayment ?? affordability.estimated_installment ?? 0).toFixed(2)}
                 </p>
               </div>
               <div>

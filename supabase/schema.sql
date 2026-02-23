@@ -37,6 +37,14 @@ create trigger on_auth_user_created
 -- RLS
 alter table public.profiles enable row level security;
 
+-- Helper function to check admin status without triggering RLS recursion
+create or replace function public.is_admin()
+returns boolean as $$
+  select exists (
+    select 1 from public.profiles where id = auth.uid() and role = 'admin'
+  );
+$$ language sql security definer;
+
 create policy "Users can view own profile"
   on public.profiles for select
   using (auth.uid() = id);
@@ -47,12 +55,11 @@ create policy "Users can update own profile"
 
 create policy "Admins can view all profiles"
   on public.profiles for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
+
+create policy "Admins can update all profiles"
+  on public.profiles for update
+  using (public.is_admin());
 
 -- 2. DOCUMENTS
 -- ============================================================
@@ -79,21 +86,11 @@ create policy "Users can insert own documents"
 
 create policy "Admins can view all documents"
   on public.documents for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can update all documents"
   on public.documents for update
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- 3. LOAN APPLICATIONS
 -- ============================================================
@@ -130,21 +127,11 @@ create policy "Users can update own draft applications"
 
 create policy "Admins can view all applications"
   on public.loan_applications for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can update all applications"
   on public.loan_applications for update
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- 4. LOANS
 -- ============================================================
@@ -171,30 +158,15 @@ create policy "Users can view own loans"
 
 create policy "Admins can view all loans"
   on public.loans for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can insert loans"
   on public.loans for insert
-  with check (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  with check (public.is_admin());
 
 create policy "Admins can update loans"
   on public.loans for update
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- 5. REPAYMENTS
 -- ============================================================
@@ -224,30 +196,15 @@ create policy "Users can view own repayments"
 
 create policy "Admins can view all repayments"
   on public.repayments for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can insert repayments"
   on public.repayments for insert
-  with check (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  with check (public.is_admin());
 
 create policy "Admins can update repayments"
   on public.repayments for update
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- 6. TIERS
 -- ============================================================
@@ -268,12 +225,7 @@ create policy "Anyone can view tiers"
 
 create policy "Admins can manage tiers"
   on public.tiers for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- Seed tiers
 insert into public.tiers (name, min_successful_repayments, max_loan, interest_rate, rules) values
@@ -301,21 +253,11 @@ create policy "Users can view own tier history"
 
 create policy "Admins can view all tier history"
   on public.user_tier_history for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can manage tier history"
   on public.user_tier_history for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- Auto-assign Basic tier to new profiles
 create or replace function public.assign_default_tier()
@@ -323,7 +265,7 @@ returns trigger as $$
 declare
   basic_tier_id uuid;
 begin
-  select id into basic_tier_id from public.tiers where name = 'Basic' limit 1;
+  select id into basic_tier_id from public.tiers where name = 'Tier 1' limit 1;
   if basic_tier_id is not null then
     insert into public.user_tier_history (user_id, tier_id)
     values (new.id, basic_tier_id);
@@ -353,12 +295,7 @@ alter table public.audit_logs enable row level security;
 
 create policy "Admins can view audit logs"
   on public.audit_logs for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Authenticated users can insert audit logs"
   on public.audit_logs for insert

@@ -9,6 +9,7 @@ const adminNav = [
   { title: "Documents", href: "/admin/documents", icon: "📄" },
   { title: "Audit Log", href: "/admin/audit", icon: "🔍" },
   { title: "Exports", href: "/admin/exports", icon: "📤" },
+  { title: "Settings", href: "/admin/settings", icon: "⚙️" },
 ];
 
 export default function AdminLayout({

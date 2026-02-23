@@ -28,6 +28,25 @@ function loanStatusBadge(status: string) {
   }
 }
 
+function appStatusBadge(status: string) {
+  switch (status) {
+    case "submitted":
+      return <Badge variant="secondary">Submitted</Badge>;
+    case "under_review":
+      return <Badge variant="secondary">Under Review</Badge>;
+    case "approved":
+      return <Badge className="bg-green-600">Approved</Badge>;
+    case "rejected":
+      return <Badge variant="destructive">Rejected</Badge>;
+    case "disbursed":
+      return <Badge>Disbursed</Badge>;
+    case "cancelled":
+      return <Badge variant="outline">Cancelled</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
 export default async function LoansPage() {
   const supabase = await createClient();
 
@@ -35,6 +54,13 @@ export default async function LoansPage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  const { data: applications } = await supabase
+    .from("loan_applications")
+    .select("*")
+    .eq("user_id", user.id)
+    .in("status", ["draft", "submitted", "under_review", "rejected", "cancelled"])
+    .order("created_at", { ascending: false });
 
   const { data: loans } = await supabase
     .from("loans")
@@ -51,7 +77,47 @@ export default async function LoansPage() {
         </p>
       </div>
 
+      {/* Pending Applications */}
+      {applications && applications.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Applications</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Applied</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {applications.map((app) => (
+                  <TableRow key={app.id}>
+                    <TableCell className="font-medium">
+                      R{Number(app.amount_requested).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      {new Date(app.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>{appStatusBadge(app.status)}</TableCell>
+                    <TableCell>
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/user/application/${app.id}`}>View</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {!loans || loans.length === 0 ? (
+        (!applications || applications.length === 0) && (
         <Card>
           <CardContent className="pt-6 text-center">
             <p className="text-muted-foreground">You don&apos;t have any loans yet.</p>
@@ -60,6 +126,7 @@ export default async function LoansPage() {
             </Button>
           </CardContent>
         </Card>
+        )
       ) : (
         <Card>
           <CardHeader>
