@@ -41,21 +41,18 @@ export default function LoginPage() {
       return;
     }
 
-    // Fetch role to redirect correctly
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
+      const { data: role } = await supabase.rpc("get_my_role");
 
-      router.push(profile?.role === "admin" ? "/admin" : "/user");
-      router.refresh();
+      window.location.href = role === "admin" ? "/admin" : "/user";
+      return;
     }
+
+    window.location.href = "/user";
   }
 
   return (

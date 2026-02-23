@@ -46,15 +46,12 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Get the user's role via RPC (bypasses RLS)
+  const { data: role } = await supabase.rpc("get_my_role");
+
   // If logged in, check role for admin routes
   if (user && pathname.startsWith("/admin")) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile || profile.role !== "admin") {
+    if (role !== "admin") {
       const url = request.nextUrl.clone();
       url.pathname = "/user";
       return NextResponse.redirect(url);
@@ -63,14 +60,8 @@ export async function updateSession(request: NextRequest) {
 
   // If logged in and visiting login/signup, redirect to dashboard
   if (user && (pathname === "/login" || pathname === "/signup")) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
     const url = request.nextUrl.clone();
-    url.pathname = profile?.role === "admin" ? "/admin" : "/user";
+    url.pathname = role === "admin" ? "/admin" : "/user";
     return NextResponse.redirect(url);
   }
 
