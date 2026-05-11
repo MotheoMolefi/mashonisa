@@ -1,8 +1,13 @@
+/**
+ * Admin home: KPI cards, Recharts pies (loans/repayments + interest), quick links.
+ * When DB has no chart data yet, server injects demo slices so charts aren’t empty.
+ */
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { DashboardCharts } from "@/components/admin/dashboard-charts";
 
 export default async function AdminDashboard() {
   const supabase = await createClient();
@@ -12,7 +17,7 @@ export default async function AdminDashboard() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Fetch counts
+  // --- Summary counts (header cards) ---
   const { count: pendingApps } = await supabase
     .from("loan_applications")
     .select("*", { count: "exact", head: true })
@@ -38,6 +43,59 @@ export default async function AdminDashboard() {
       (sum, loan) => sum + Number(loan.total_payable),
       0
     ) ?? 0;
+
+  // --- Chart datasets (fallback demo when all empty) ---
+  const { data: settledLoans } = await supabase
+    .from("loans")
+    .select("interest_amount")
+    .eq("status", "settled");
+  const interestEarned =
+    settledLoans?.reduce((sum, l) => sum + Number(l.interest_amount ?? 0), 0) ?? 0;
+
+  const { data: allLoans } = await supabase.from("loans").select("status");
+  const loanCounts = { active: 0, settled: 0, in_arrears: 0, written_off: 0 };
+  allLoans?.forEach((l) => {
+    if (l.status in loanCounts) loanCounts[l.status as keyof typeof loanCounts]++;
+  });
+  const loansPieDataRaw = [
+    { name: "Active", value: loanCounts.active },
+    { name: "Settled", value: loanCounts.settled },
+    { name: "In arrears", value: loanCounts.in_arrears },
+    { name: "Written off", value: loanCounts.written_off },
+  ].filter((d) => d.value > 0);
+
+  const { data: allRepayments } = await supabase.from("repayments").select("status");
+  const repCounts = { paid: 0, late: 0, due: 0, partial: 0 };
+  allRepayments?.forEach((r) => {
+    if (r.status in repCounts) repCounts[r.status as keyof typeof repCounts]++;
+  });
+  const repaymentsPieDataRaw = [
+    { name: "Paid", value: repCounts.paid },
+    { name: "Late", value: repCounts.late },
+    { name: "No payment (due)", value: repCounts.due },
+    { name: "Partial", value: repCounts.partial },
+  ].filter((d) => d.value > 0);
+
+  // Dummy data when empty so you can see what the charts look like
+  const loansPieData =
+    loansPieDataRaw.length > 0
+      ? loansPieDataRaw
+      : [
+          { name: "Active", value: 12 },
+          { name: "Settled", value: 8 },
+          { name: "In arrears", value: 2 },
+          { name: "Written off", value: 1 },
+        ];
+  const repaymentsPieData =
+    repaymentsPieDataRaw.length > 0
+      ? repaymentsPieDataRaw
+      : [
+          { name: "Paid", value: 45 },
+          { name: "Late", value: 3 },
+          { name: "No payment (due)", value: 7 },
+          { name: "Partial", value: 2 },
+        ];
+  const chartInterestEarned = interestEarned > 0 ? interestEarned : 12_500;
 
   return (
     <div className="space-y-6">
@@ -77,7 +135,9 @@ export default async function AdminDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">
+            <div
+              className={`text-2xl font-bold ${(lateRepayments ?? 0) > 0 ? "text-destructive" : ""}`}
+            >
               {lateRepayments ?? 0}
             </div>
           </CardContent>
@@ -96,6 +156,13 @@ export default async function AdminDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Charts */}
+      <DashboardCharts
+        loansPieData={loansPieData}
+        repaymentsPieData={repaymentsPieData}
+        interestEarned={chartInterestEarned}
+      />
 
       {/* Quick Links */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -6,6 +6,7 @@ const adminNav = [
   { title: "Dashboard", href: "/admin", icon: "📊" },
   { title: "Applications", href: "/admin/applications", icon: "📝" },
   { title: "Loans", href: "/admin/loans", icon: "💰" },
+  { title: "Tiers", href: "/admin/tiers", icon: "📈" },
   { title: "Documents", href: "/admin/documents", icon: "📄" },
   { title: "Audit Log", href: "/admin/audit", icon: "🔍" },
   { title: "Exports", href: "/admin/exports", icon: "📤" },

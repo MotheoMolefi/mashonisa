@@ -1,3 +1,7 @@
+/**
+ * Writes a row to `audit_logs` for the currently authenticated user.
+ * Used after admin actions (approve loan, record payment, etc.). No-op if no user.
+ */
 import { SupabaseClient } from "@supabase/supabase-js";
 
 export async function logAudit(

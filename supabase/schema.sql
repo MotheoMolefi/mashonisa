@@ -84,6 +84,10 @@ create policy "Users can insert own documents"
   on public.documents for insert
   with check (auth.uid() = user_id);
 
+create policy "Users can delete own documents"
+  on public.documents for delete
+  using (auth.uid() = user_id);
+
 create policy "Admins can view all documents"
   on public.documents for select
   using (public.is_admin());
@@ -107,6 +111,7 @@ create table if not exists public.loan_applications (
     status in ('draft', 'submitted', 'under_review', 'approved', 'rejected', 'disbursed', 'cancelled')
   ),
   admin_notes text,
+  next_pay_date date,
   created_at timestamptz not null default now(),
   submitted_at timestamptz
 );
@@ -142,6 +147,9 @@ create table if not exists public.loans (
   principal numeric not null,
   interest_rate numeric not null,
   fees numeric not null default 0,
+  admin_fee numeric not null default 100,
+  vat_amount numeric not null default 0,
+  interest_amount numeric not null default 0,
   total_payable numeric not null,
   start_date date,
   status text not null default 'active' check (
@@ -227,13 +235,16 @@ create policy "Admins can manage tiers"
   on public.tiers for all
   using (public.is_admin());
 
--- Seed tiers
+-- Seed tiers (3 only: R700, R1000, R1500)
 insert into public.tiers (name, min_successful_repayments, max_loan, interest_rate, rules) values
   ('Tier 1',  0, 700,   5.0, '{"description": "New borrower"}'),
   ('Tier 2',  1, 1000,  4.5, '{"description": "After 1 successful repayment"}'),
-  ('Tier 3',  3, 2000,  4.0, '{"description": "Higher limit"}'),
-  ('Tier 4',  5, 3000,  3.5, '{"description": "Premium borrower"}')
-on conflict (name) do nothing;
+  ('Tier 3',  3, 1500,  4.0, '{"description": "Higher limit"}')
+on conflict (name) do update set
+  min_successful_repayments = excluded.min_successful_repayments,
+  max_loan = excluded.max_loan,
+  interest_rate = excluded.interest_rate,
+  rules = excluded.rules;
 
 -- 7. USER TIER HISTORY
 -- ============================================================
@@ -278,6 +289,33 @@ drop trigger if exists on_profile_created on public.profiles;
 create trigger on_profile_created
   after insert on public.profiles
   for each row execute function public.assign_default_tier();
+
+-- Tier progression: when a loan is settled, promote user to next tier if eligible
+create or replace function public.promote_tier_on_loan_settled()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_user_id uuid;
+  v_paid_count int;
+  v_current_tier_id uuid;
+  v_new_tier_id uuid;
+begin
+  if new.status <> 'settled' or old.status = 'settled' then return new; end if;
+  v_user_id := new.user_id;
+  select count(*) into v_paid_count from public.repayments r
+  join public.loans l on l.id = r.loan_id and l.user_id = v_user_id where r.status = 'paid';
+  select tier_id into v_current_tier_id from public.user_tier_history
+  where user_id = v_user_id and effective_to is null limit 1;
+  select t.id into v_new_tier_id from public.tiers t
+  where t.min_successful_repayments <= v_paid_count order by t.min_successful_repayments desc limit 1;
+  if v_new_tier_id is null or v_new_tier_id = v_current_tier_id then return new; end if;
+  update public.user_tier_history set effective_to = current_date where user_id = v_user_id and effective_to is null;
+  insert into public.user_tier_history (user_id, tier_id, effective_from, effective_to)
+  values (v_user_id, v_new_tier_id, current_date, null);
+  return new;
+end; $$;
+drop trigger if exists on_loan_settled_promote_tier on public.loans;
+create trigger on_loan_settled_promote_tier after update of status on public.loans
+  for each row execute function public.promote_tier_on_loan_settled();
 
 -- 8. AUDIT LOGS
 -- ============================================================

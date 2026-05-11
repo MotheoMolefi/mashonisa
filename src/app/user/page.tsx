@@ -1,9 +1,14 @@
+/**
+ * Borrower home (`/user`): tier, limit, active loan snapshot, next repayment,
+ * and shortcuts. Data is read-only; mutations live on other routes.
+ */
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { isRepaymentOverdue, isRepaymentFullyPaid } from "@/lib/repayments";
 
 export default async function UserDashboard() {
   const supabase = await createClient();
@@ -13,7 +18,7 @@ export default async function UserDashboard() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Fetch profile
+  // --- Profile + display name (may backfill from auth metadata) ---
   let { data: profile } = await supabase
     .from("profiles")
     .select("*")
@@ -39,7 +44,7 @@ export default async function UserDashboard() {
       .eq("id", user.id);
   }
 
-  // Fetch current tier
+  // --- Tier from open row in user_tier_history ---
   const { data: currentTier } = await supabase
     .from("user_tier_history")
     .select("*, tiers(*)")
@@ -47,7 +52,7 @@ export default async function UserDashboard() {
     .is("effective_to", null)
     .single();
 
-  // Fetch active loan
+  // --- At most one "active" loan in this product ---
   const { data: activeLoan } = await supabase
     .from("loans")
     .select("*")
@@ -55,21 +60,19 @@ export default async function UserDashboard() {
     .eq("status", "active")
     .single();
 
-  // Fetch next repayment
+  // --- Earliest repayment row that still has a balance (any status except fully paid) ---
   let nextRepayment = null;
   if (activeLoan) {
-    const { data } = await supabase
+    const { data: reps } = await supabase
       .from("repayments")
       .select("*")
       .eq("loan_id", activeLoan.id)
-      .in("status", ["due", "late"])
-      .order("due_date", { ascending: true })
-      .limit(1)
-      .single();
-    nextRepayment = data;
+      .order("due_date", { ascending: true });
+    nextRepayment =
+      reps?.find((r) => !isRepaymentFullyPaid(r)) ?? null;
   }
 
-  // Fetch latest application
+  // --- Shown when there is no active loan (application pipeline status) ---
   const { data: latestApp } = await supabase
     .from("loan_applications")
     .select("*")
@@ -144,6 +147,11 @@ export default async function UserDashboard() {
           <CardContent>
             {nextRepayment ? (
               <div>
+                {isRepaymentOverdue(nextRepayment) && (
+                  <Badge variant="destructive" className="mb-2">
+                    Overdue
+                  </Badge>
+                )}
                 <div className="text-2xl font-bold">
                   R{Number(nextRepayment.amount_due).toLocaleString()}
                 </div>

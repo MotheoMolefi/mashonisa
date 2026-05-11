@@ -1,3 +1,7 @@
+/**
+ * Single loan view for the borrower: summary cards + repayment schedule table.
+ * RLS ensures the loan belongs to the logged-in user.
+ */
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isRepaymentOverdue } from "@/lib/repayments";
 
 function repaymentStatusBadge(status: string) {
   switch (status) {
@@ -22,6 +27,18 @@ function repaymentStatusBadge(status: string) {
     default:
       return <Badge variant="secondary">Due</Badge>;
   }
+}
+
+function repaymentStatusCell(rep: {
+  status: string;
+  due_date: string;
+  amount_due: number;
+  amount_paid: number;
+}) {
+  if (isRepaymentOverdue(rep)) {
+    return <Badge variant="destructive">Overdue</Badge>;
+  }
+  return repaymentStatusBadge(rep.status);
 }
 
 export default async function LoanDetailPage({
@@ -94,18 +111,44 @@ export default async function LoanDetailPage({
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Interest Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {Number(loan.interest_rate)}% p.m.
-            </div>
-          </CardContent>
-        </Card>
+        {(loan.admin_fee != null || loan.interest_amount != null) ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Cost breakdown
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Admin fee</span>
+                <span>R{Number(loan.admin_fee ?? 0).toFixed(2)}</span>
+              </div>
+              {Number(loan.vat_amount ?? 0) > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">VAT</span>
+                  <span>R{Number(loan.vat_amount).toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Interest</span>
+                <span>R{Number(loan.interest_amount ?? 0).toFixed(2)}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Interest Rate
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">
+                {Number(loan.interest_rate)}% p.m.
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -144,7 +187,14 @@ export default async function LoanDetailPage({
               </TableHeader>
               <TableBody>
                 {repayments.map((rep, i) => (
-                  <TableRow key={rep.id}>
+                  <TableRow
+                    key={rep.id}
+                    className={
+                      isRepaymentOverdue(rep)
+                        ? "bg-destructive/5 dark:bg-destructive/10"
+                        : undefined
+                    }
+                  >
                     <TableCell>{i + 1}</TableCell>
                     <TableCell>
                       {new Date(rep.due_date).toLocaleDateString()}
@@ -155,9 +205,7 @@ export default async function LoanDetailPage({
                     <TableCell>
                       R{Number(rep.amount_paid).toLocaleString()}
                     </TableCell>
-                    <TableCell>
-                      {repaymentStatusBadge(rep.status)}
-                    </TableCell>
+                    <TableCell>{repaymentStatusCell(rep)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

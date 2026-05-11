@@ -1,3 +1,7 @@
+/**
+ * Supabase client for Client Components (browser). Session lives in cookies
+ * refreshed by middleware.
+ */
 import { createBrowserClient } from "@supabase/ssr";
 
 export function createClient() {

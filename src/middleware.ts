@@ -1,3 +1,4 @@
+/** Next.js entry: delegates to lib/supabase/middleware for auth + route guards. */
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 

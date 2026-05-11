@@ -13,6 +13,15 @@ const STATUS_STEPS = [
   "disbursed",
 ] as const;
 
+/** JSONB `affordability_result` may include `total_repayment` before the TS type on all branches includes it. */
+function displayTotalRepayment(aff: AffordabilityResult): string {
+  const withTotal = aff as AffordabilityResult & { total_repayment?: number };
+  const n = Number(
+    withTotal.total_repayment ?? aff.estimated_installment ?? 0
+  );
+  return n.toFixed(2);
+}
+
 function statusColor(status: string) {
   switch (status) {
     case "approved":
@@ -194,7 +203,7 @@ export default async function ApplicationDetailPage({
               <div>
                 <span className="text-muted-foreground">Total Repayment</span>
                 <p className="font-medium">
-                  R{Number(affordability.total_repayment ?? affordability.estimated_installment ?? 0).toFixed(2)}
+                  R{displayTotalRepayment(affordability)}
                 </p>
               </div>
               <div>

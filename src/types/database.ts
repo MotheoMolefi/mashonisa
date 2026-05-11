@@ -1,3 +1,6 @@
+/**
+ * TypeScript mirrors of Supabase tables and enums. Keep in sync with supabase/schema.sql.
+ */
 export type UserRole = "user" | "admin";
 
 export type DocumentType =
@@ -45,8 +48,9 @@ export interface Document {
 
 export interface AffordabilityResult {
   disposable_income: number;
-  max_installment: number;
-  estimated_installment: number;
+  total_repayment?: number;
+  max_installment?: number;
+  estimated_installment?: number;
   eligible: boolean;
   reasons: string[];
 }
@@ -62,6 +66,7 @@ export interface LoanApplication {
   affordability_result: AffordabilityResult | null;
   status: ApplicationStatus;
   admin_notes: string | null;
+  next_pay_date: string | null;
   created_at: string;
   submitted_at: string | null;
   // Joined fields
@@ -75,6 +80,9 @@ export interface Loan {
   principal: number;
   interest_rate: number;
   fees: number;
+  admin_fee?: number;
+  vat_amount?: number;
+  interest_amount?: number;
   total_payable: number;
   start_date: string | null;
   status: LoanStatus;

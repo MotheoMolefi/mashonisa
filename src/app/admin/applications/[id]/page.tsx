@@ -5,6 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
+import {
+  areAllRequiredLoanDocumentsVerified,
+  missingVerifiedLoanDocuments,
+  requiredLoanDocumentLabel,
+} from "@/lib/documents";
+import { getLoanPricing } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,6 +90,18 @@ export default function ApplicationDetailPage() {
       meta: { admin_notes: adminNotes },
     });
 
+    if (newStatus === "rejected") {
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "application_rejected",
+          userId: app.user_id,
+          applicationId: app.id,
+        }),
+      }).catch(() => {});
+    }
+
     toast.success(`Application ${newStatus.replace("_", " ")}`);
     setApp({ ...app, status: newStatus as LoanApplication["status"] });
     setActionLoading(false);
@@ -93,6 +111,21 @@ export default function ApplicationDetailPage() {
     if (!app || !profile) return;
     setActionLoading(true);
 
+    const { data: latestDocs } = await supabase
+      .from("documents")
+      .select("type, status")
+      .eq("user_id", app.user_id);
+
+    const latest = latestDocs ?? [];
+    if (!areAllRequiredLoanDocumentsVerified(latest)) {
+      const missing = missingVerifiedLoanDocuments(latest);
+      toast.error("All three documents must be verified before approval.", {
+        description: `Still need: ${missing.map(requiredLoanDocumentLabel).join(", ")}`,
+      });
+      setActionLoading(false);
+      return;
+    }
+
     // Fetch user's current tier for interest rate
     const { data: tierHistory } = await supabase
       .from("user_tier_history")
@@ -101,10 +134,9 @@ export default function ApplicationDetailPage() {
       .is("effective_to", null)
       .single();
 
-    const interestRate = tierHistory?.tiers?.interest_rate ?? 5;
     const principal = Number(app.amount_requested);
-    const rate = interestRate / 100;
-    const totalPayable = principal * (1 + rate);
+    const { totalPayable, adminFee, vatAmount, interestAmount } = getLoanPricing(principal);
+    const interestRate = principal > 0 ? (interestAmount / principal) * 100 : 0;
 
     // Create loan
     const { data: loan, error: loanError } = await supabase
@@ -113,8 +145,11 @@ export default function ApplicationDetailPage() {
         application_id: app.id,
         user_id: app.user_id,
         principal,
-        interest_rate: interestRate,
+        interest_rate: Math.round(interestRate * 100) / 100,
         fees: 0,
+        admin_fee: adminFee,
+        vat_amount: vatAmount,
+        interest_amount: interestAmount,
         total_payable: totalPayable,
         status: "active",
       })
@@ -156,8 +191,21 @@ export default function ApplicationDetailPage() {
       action: "LOAN_CREATED",
       entityType: "loan",
       entityId: loan.id,
-      meta: { principal, interest_rate: interestRate },
+      meta: { principal, total_payable: totalPayable, admin_fee: adminFee, vat_amount: vatAmount, interest_amount: interestAmount },
     });
+
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "application_approved",
+        userId: app.user_id,
+        applicationId: app.id,
+        loanId: loan.id,
+        amount: principal,
+        totalPayable,
+      }),
+    }).catch(() => {});
 
     toast.success("Application approved and loan created!");
     router.push(`/admin/loans/${loan.id}`);
@@ -183,6 +231,9 @@ export default function ApplicationDetailPage() {
 
   const affordability = app.affordability_result as AffordabilityResult | null;
   const isActionable = app.status === "submitted" || app.status === "under_review";
+  const previewPricing = app.amount_requested ? getLoanPricing(Number(app.amount_requested)) : null;
+  const missingVerifiedDocs = missingVerifiedLoanDocuments(docs);
+  const allThreeDocumentsVerified = areAllRequiredLoanDocumentsVerified(docs);
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -252,6 +303,12 @@ export default function ApplicationDetailPage() {
               <span className="text-muted-foreground">Term</span>
               <span className="font-medium">1 salary cycle</span>
             </div>
+            {previewPricing && (
+              <div className="flex justify-between border-t pt-2">
+                <span className="text-muted-foreground">Total payable (35%)</span>
+                <span className="font-bold">R{previewPricing.totalPayable.toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Monthly Income</span>
               <span className="font-medium">
@@ -349,12 +406,28 @@ export default function ApplicationDetailPage() {
 
       <Separator />
 
-      {/* Admin Notes + Actions */}
+      {/* Notes + approval actions */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Admin Decision</CardTitle>
+          <CardTitle className="text-base">Action Required</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {isActionable && !allThreeDocumentsVerified && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+              <p className="font-medium">All three documents must be verified</p>
+              <p className="mt-1 text-muted-foreground dark:text-amber-200/90">
+                Pending:{" "}
+                {missingVerifiedDocs.map(requiredLoanDocumentLabel).join(", ")}.
+              </p>
+              <Link
+                href="/admin/documents"
+                className="mt-2 inline-block text-sm font-medium text-amber-900 underline underline-offset-4 hover:text-amber-800 dark:text-amber-100 dark:hover:text-amber-50"
+              >
+                Open Documents →
+              </Link>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>Admin Notes</Label>
             <Textarea
@@ -378,7 +451,12 @@ export default function ApplicationDetailPage() {
               )}
               <Button
                 onClick={handleApprove}
-                disabled={actionLoading}
+                disabled={actionLoading || !allThreeDocumentsVerified}
+                title={
+                  !allThreeDocumentsVerified
+                    ? "All three (ID, payslip, bank statement) must be verified on Documents first"
+                    : undefined
+                }
               >
                 {actionLoading ? "Processing..." : "Approve & Create Loan"}
               </Button>

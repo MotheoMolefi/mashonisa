@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin loan workspace: summary, disburse, repayment table (record payment dialog),
+ * overdue highlighting. Mutations use Supabase client + logAudit; PayFast is user-only.
+ */
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -27,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import type { Loan, Repayment, Profile } from "@/types/database";
+import { isRepaymentOverdue, isRepaymentFullyPaid } from "@/lib/repayments";
 
 export default function LoanDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +45,7 @@ export default function LoanDetailPage() {
   const [paymentDialog, setPaymentDialog] = useState<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
 
+  /** Loads loan, borrower profile, and ordered repayments for this loan id. */
   const fetchData = useCallback(async () => {
     const { data: loanData } = await supabase
       .from("loans")
@@ -71,6 +77,7 @@ export default function LoanDetailPage() {
     fetchData();
   }, [fetchData]);
 
+  /** Sets start_date on loan and marks linked application disbursed; notifies borrower. */
   async function handleDisburse() {
     if (!loan) return;
     setActionLoading(true);
@@ -94,11 +101,23 @@ export default function LoanDetailPage() {
       meta: { start_date: today },
     });
 
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "loan_disbursed",
+        userId: loan.user_id,
+        loanId: loan.id,
+        principal: Number(loan.principal),
+      }),
+    }).catch(() => {});
+
     toast.success("Loan marked as disbursed");
     setLoan({ ...loan, start_date: today });
     setActionLoading(false);
   }
 
+  /** Manual payment: increments amount_paid, may settle loan and notify borrower. */
   async function handleRecordPayment() {
     if (!paymentDialog || !loan) return;
     const amount = parseFloat(paymentAmount);
@@ -150,6 +169,16 @@ export default function LoanDetailPage() {
         entityType: "loan",
         entityId: loan.id,
       });
+
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "loan_settled",
+          userId: loan.user_id,
+          loanId: loan.id,
+        }),
+      }).catch(() => {});
 
       setLoan({ ...loan, status: "settled" });
       toast.success("Payment recorded — loan fully settled!");
@@ -216,10 +245,30 @@ export default function LoanDetailPage() {
                 R{Number(loan.principal).toLocaleString()}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Interest Rate</span>
-              <span className="font-medium">{Number(loan.interest_rate)}%</span>
-            </div>
+            {loan.admin_fee != null && loan.interest_amount != null && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Admin fee</span>
+                  <span className="font-medium">R{Number(loan.admin_fee).toFixed(2)}</span>
+                </div>
+                {Number(loan.vat_amount ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">VAT</span>
+                    <span className="font-medium">R{Number(loan.vat_amount).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Interest</span>
+                  <span className="font-medium">R{Number(loan.interest_amount).toFixed(2)}</span>
+                </div>
+              </>
+            )}
+            {(loan.admin_fee == null && loan.interest_amount == null) && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Interest Rate</span>
+                <span className="font-medium">{Number(loan.interest_rate)}%</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total Payable</span>
               <span className="font-bold">
@@ -265,7 +314,7 @@ export default function LoanDetailPage() {
         </Card>
       </div>
 
-      {/* Repayments */}
+      {/* --- Repayment rows: overdue = past due date & not fully paid (see lib/repayments) --- */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Repayment Schedule</CardTitle>
@@ -284,11 +333,14 @@ export default function LoanDetailPage() {
               </TableHeader>
               <TableBody>
                 {repayments.map((r) => {
-                  const isLate =
-                    r.status !== "paid" &&
-                    new Date(r.due_date) < new Date();
+                  const overdue = isRepaymentOverdue(r);
                   return (
-                    <TableRow key={r.id}>
+                    <TableRow
+                      key={r.id}
+                      className={
+                        overdue ? "bg-destructive/5 dark:bg-destructive/10" : undefined
+                      }
+                    >
                       <TableCell>
                         {new Date(r.due_date).toLocaleDateString()}
                       </TableCell>
@@ -297,18 +349,22 @@ export default function LoanDetailPage() {
                       <TableCell>
                         <Badge
                           variant={
-                            r.status === "paid"
+                            r.status === "paid" || isRepaymentFullyPaid(r)
                               ? "default"
-                              : isLate
+                              : overdue
                                 ? "destructive"
                                 : "secondary"
                           }
                         >
-                          {isLate && r.status !== "paid" ? "late" : r.status}
+                          {overdue
+                            ? "Overdue"
+                            : isRepaymentFullyPaid(r)
+                              ? "Paid"
+                              : r.status}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {r.status !== "paid" && isActive && (
+                        {!isRepaymentFullyPaid(r) && isActive && (
                           <Button
                             size="sm"
                             variant="outline"

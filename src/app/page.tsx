@@ -1,3 +1,6 @@
+/**
+ * Public marketing home: no auth. Links to signup/login only (no admin shortcut).
+ */
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -16,12 +19,6 @@ export default function LandingPage() {
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               How it works
-            </Link>
-            <Link
-              href="/login"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Admin
             </Link>
             <Button asChild variant="outline" size="sm">
               <Link href="/login">Log in</Link>

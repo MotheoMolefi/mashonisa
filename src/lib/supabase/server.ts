@@ -1,3 +1,7 @@
+/**
+ * Supabase client for Server Components, Server Actions, and Route Handlers.
+ * Uses the logged-in user's cookies so RLS policies apply as that user.
+ */
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 

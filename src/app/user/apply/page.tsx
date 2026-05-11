@@ -1,6 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+/**
+ * Multi-step loan application (client component): documents → finances & payday →
+ * amount → confirm/submit. Draft persisted in localStorage; uploads go to Storage + `documents`.
+ */
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -9,7 +13,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { toast } from "sonner";
+import { CalendarIcon, FileText, X } from "lucide-react";
+import { startOfDay } from "date-fns";
+import { getLoanPricing } from "@/lib/pricing";
 import type { Tier, Document, DocumentType, DocumentStatus } from "@/types/database";
 
 type Step = 1 | 2 | 3 | 4;
@@ -17,6 +30,7 @@ type Step = 1 | 2 | 3 | 4;
 const REQUIRED_DOCS: { type: DocumentType; label: string }[] = [
   { type: "id_doc", label: "ID Document" },
   { type: "payslip", label: "Latest Payslip" },
+  { type: "bank_statement", label: "Bank Statement" },
 ];
 
 const STEP_LABELS = ["Your Documents", "Your Finances", "Loan Amount", "Confirm & Submit"];
@@ -34,11 +48,14 @@ function statusBadge(status: DocumentStatus) {
 
 export default function ApplyPage() {
   const router = useRouter();
-  const supabase = createClient();
+  // Stable instance so useCallback(fetchData) and its useEffect do not re-run every render.
+  const supabase = useMemo(() => createClient(), []);
 
   const [step, setStep] = useState<Step>(1);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState<DocumentType | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [pendingDocs, setPendingDocs] = useState<Partial<Record<DocumentType, File>>>({});
+  const fileInputRefs = useRef<Partial<Record<DocumentType, HTMLInputElement>>>({});
   const [initialLoading, setInitialLoading] = useState(true);
   const [tier, setTier] = useState<Tier | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
@@ -53,7 +70,7 @@ export default function ApplyPage() {
       const saved = localStorage.getItem(FORM_KEY);
       if (saved) return JSON.parse(saved);
     }
-    return { amount_requested: "", monthly_income: "", monthly_expenses: "", existing_debt: "" };
+    return { amount_requested: "", monthly_income: "", monthly_expenses: "", existing_debt: "", next_pay_date: "" };
   });
 
   useEffect(() => {
@@ -134,7 +151,13 @@ export default function ApplyPage() {
 
   const hasIdDoc = docs.some((d) => d.type === "id_doc");
   const hasPayslip = docs.some((d) => d.type === "payslip");
-  const canSubmit = hasIdDoc && hasPayslip;
+  const hasBankStatement = docs.some((d) => d.type === "bank_statement");
+  const hasIdDocOrPending = hasIdDoc || !!pendingDocs.id_doc;
+  const hasPayslipOrPending = hasPayslip || !!pendingDocs.payslip;
+  const hasBankStatementOrPending = hasBankStatement || !!pendingDocs.bank_statement;
+  const canProceedFromStep1 =
+    hasIdDocOrPending && hasPayslipOrPending && hasBankStatementOrPending;
+  const canSubmit = hasIdDoc && hasPayslip && hasBankStatement;
 
   const amount = parseFloat(form.amount_requested) || 0;
   const income = parseFloat(form.monthly_income) || 0;
@@ -142,13 +165,22 @@ export default function ApplyPage() {
   const debt = parseFloat(form.existing_debt) || 0;
 
   const disposable = income - expenses - debt;
-  const rate = (tier?.interest_rate ?? 5) / 100;
-  const totalRepayment = amount * (1 + rate);
 
-  async function handleUpload(type: DocumentType, e: React.ChangeEvent<HTMLInputElement>) {
+  const todayStart = startOfDay(new Date());
+  const paydayDate = form.next_pay_date
+    ? new Date(form.next_pay_date + "T12:00:00")
+    : null;
+  const isPaydayValid =
+    !!form.next_pay_date &&
+    !!paydayDate &&
+    !Number.isNaN(paydayDate.getTime()) &&
+    startOfDay(paydayDate) >= todayStart;
+  const pricing = amount > 0 ? getLoanPricing(amount) : null;
+  const totalRepayment = pricing?.totalPayable ?? 0;
+
+  function handleFileSelect(type: DocumentType, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     if (file.size > 10 * 1024 * 1024) {
       toast.error("File too large. Maximum size is 10MB.");
       return;
@@ -158,36 +190,33 @@ export default function ApplyPage() {
       toast.error("Invalid file type. Upload PDF, JPG, PNG, or WebP.");
       return;
     }
+    setPendingDocs((prev) => ({ ...prev, [type]: file }));
+  }
 
-    setUploading(type);
-
+  async function uploadOneDocument(type: DocumentType, file: File): Promise<boolean> {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) {
-      toast.error("Not authenticated");
-      setUploading(null);
-      return;
+    if (!user) return false;
+    const { data: existingRows } = await supabase
+      .from("documents")
+      .select("id, storage_path")
+      .eq("user_id", user.id)
+      .eq("type", type);
+    if (existingRows?.length) {
+      const paths = existingRows.map((r) => r.storage_path);
+      await supabase.storage.from("documents").remove(paths);
+      await supabase.from("documents").delete().eq("user_id", user.id).eq("type", type);
     }
-
     const fileExt = file.name.split(".").pop();
     const filePath = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
-
     const { error: uploadError } = await supabase.storage
       .from("documents")
       .upload(filePath, file);
     if (uploadError) {
       toast.error("Upload failed: " + uploadError.message);
-      setUploading(null);
-      return;
+      return false;
     }
-
-    // Replace existing doc of same type
-    const existing = docs.find((d) => d.type === type);
-    if (existing) {
-      await supabase.from("documents").delete().eq("id", existing.id);
-    }
-
     const { error: dbError } = await supabase.from("documents").insert({
       user_id: user.id,
       type,
@@ -197,15 +226,89 @@ export default function ApplyPage() {
     });
     if (dbError) {
       toast.error("Failed to save document: " + dbError.message);
-      setUploading(null);
+      return false;
+    }
+    return true;
+  }
+
+  async function handleStep1Next() {
+    if (!canProceedFromStep1) return;
+    const toUpload = REQUIRED_DOCS.filter((req) => pendingDocs[req.type]);
+    if (toUpload.length === 0) {
+      goToStep(2);
+      return;
+    }
+    setUploading(true);
+    for (const { type } of toUpload) {
+      const file = pendingDocs[type];
+      if (!file) continue;
+      const ok = await uploadOneDocument(type, file);
+      if (!ok) {
+        setUploading(false);
+        return;
+      }
+    }
+    setPendingDocs({});
+    REQUIRED_DOCS.forEach(({ type }) => {
+      const input = fileInputRefs.current[type];
+      if (input) input.value = "";
+    });
+    await fetchData();
+    setUploading(false);
+    goToStep(2);
+  }
+
+  async function handleRemoveDocument(doc: Document) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: rows, error: selectError } = await supabase
+      .from("documents")
+      .select("id, storage_path")
+      .eq("user_id", user.id)
+      .eq("type", doc.type);
+
+    if (selectError) {
+      toast.error("Failed to load documents: " + selectError.message);
       return;
     }
 
-    const label = REQUIRED_DOCS.find((d) => d.type === type)?.label ?? "Document";
-    toast.success(`${label} uploaded successfully`);
-    setUploading(null);
-    fetchData();
-    e.target.value = "";
+    if (!rows?.length) {
+      await fetchData();
+      return;
+    }
+
+    const ids = rows.map((r) => r.id);
+    const { data: deleted, error: dbError } = await supabase
+      .from("documents")
+      .delete()
+      .in("id", ids)
+      .select("id, storage_path");
+
+    if (dbError) {
+      toast.error("Failed to remove document: " + dbError.message);
+      return;
+    }
+
+    if (!deleted?.length) {
+      toast.error(
+        "Could not delete the document in the database. Run migration 20250407_documents_user_delete.sql on your Supabase project (adds the policy users need to remove uploads), then try again."
+      );
+      return;
+    }
+
+    const paths = [...new Set(deleted.map((r) => r.storage_path).filter(Boolean))];
+    if (paths.length) {
+      const { error: storageError } = await supabase.storage.from("documents").remove(paths);
+      if (storageError) {
+        toast.warning("Document removed from your application, but storage cleanup failed: " + storageError.message);
+      }
+    }
+
+    await fetchData();
+    toast.success("Document removed");
   }
 
   async function handleSubmit() {
@@ -219,6 +322,10 @@ export default function ApplyPage() {
     }
     if (tier && amount > Number(tier.max_loan)) {
       toast.error(`Amount exceeds your tier limit of R${Number(tier.max_loan).toLocaleString()}`);
+      return;
+    }
+    if (!form.next_pay_date) {
+      toast.error("Please provide your next payday.");
       return;
     }
 
@@ -258,6 +365,7 @@ export default function ApplyPage() {
         monthly_income: income,
         monthly_expenses: expenses,
         existing_debt: debt,
+        next_pay_date: form.next_pay_date || null,
         affordability_result: affordabilityResult,
         status: "submitted",
         submitted_at: new Date().toISOString(),
@@ -342,49 +450,89 @@ export default function ApplyPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Upload your ID and latest payslip to verify your identity and income. Both are required before you can proceed.
+              Upload your ID, latest payslip, and bank statement to verify your identity and income. All three are required before you can proceed.
             </p>
 
             {REQUIRED_DOCS.map((req) => {
               const existing = docs.find((d) => d.type === req.type);
-              const isUploading = uploading === req.type;
+              const pendingFile = pendingDocs[req.type];
 
               return (
                 <div key={req.type} className="rounded-md border p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{req.label}</span>
-                    {existing ? (
-                      statusBadge(existing.status as DocumentStatus)
-                    ) : (
-                      <Badge variant="outline">Not uploaded</Badge>
-                    )}
-                  </div>
-                  {existing && (
-                    <p className="text-xs text-muted-foreground">
-                      {existing.file_name} &bull;{" "}
-                      {new Date(existing.created_at).toLocaleDateString()}
-                    </p>
-                  )}
+                  <Label className="font-medium">{req.label}</Label>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
-                      {existing ? "Replace file" : "Upload file"} (PDF, JPG, PNG — max 10MB)
+                      {existing || pendingFile ? "Replace file" : "Upload file"} (PDF, JPG, PNG — max 10MB)
                     </Label>
                     <Input
+                      ref={(el) => {
+                        fileInputRefs.current[req.type] = el ?? undefined;
+                      }}
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png,.webp"
-                      onChange={(e) => handleUpload(req.type, e)}
-                      disabled={isUploading}
+                      onChange={(e) => handleFileSelect(req.type, e)}
+                      disabled={uploading}
                     />
-                    {isUploading && (
-                      <p className="text-xs text-muted-foreground">Uploading...</p>
-                    )}
                   </div>
+                  {existing && !pendingFile && (
+                    <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate" title={existing.file_name}>
+                          {existing.file_name}
+                        </span>
+                        {statusBadge(existing.status as DocumentStatus)}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveDocument(existing)}
+                        disabled={uploading}
+                        aria-label="Remove document"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  {pendingFile && (
+                    <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate" title={pendingFile.name}>
+                          {pendingFile.name}
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setPendingDocs((prev) => ({ ...prev, [req.type]: undefined }));
+                          const input = fileInputRefs.current[req.type];
+                          if (input) input.value = "";
+                        }}
+                        disabled={uploading}
+                        aria-label="Remove document"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}
 
-            <Button onClick={() => goToStep(2)} disabled={!canSubmit}>
-              {canSubmit ? "Next" : "Upload both documents to continue"}
+            {uploading && (
+              <p className="text-sm text-muted-foreground">Uploading documents...</p>
+            )}
+            <Button
+              onClick={handleStep1Next}
+              disabled={!canProceedFromStep1 || uploading}
+            >
+              {uploading ? "Uploading..." : canProceedFromStep1 ? "Next" : "Upload all documents to continue"}
             </Button>
           </CardContent>
         </Card>
@@ -427,11 +575,54 @@ export default function ApplyPage() {
                 placeholder="e.g. 1000"
               />
             </div>
+            <div className="space-y-2">
+              <Label>When is your next payday?</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start text-left font-normal"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {form.next_pay_date
+                      ? new Date(form.next_pay_date + "T12:00:00").toLocaleDateString("en-ZA", {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "Pick a date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[280px] p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={form.next_pay_date ? new Date(form.next_pay_date + "T12:00:00") : undefined}
+                    onSelect={(date) =>
+                      setFormAndSave({
+                        ...form,
+                        next_pay_date: date
+                          ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+                          : "",
+                      })
+                    }
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            {form.next_pay_date && !isPaydayValid && (
+              <p className="text-sm text-destructive">
+                Payday must be today or a future date. Please pick a valid date.
+              </p>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => goToStep(1)}>
                 Back
               </Button>
-              <Button onClick={() => goToStep(3)} disabled={!form.monthly_income}>
+              <Button
+                onClick={() => goToStep(3)}
+                disabled={!form.monthly_income || !isPaydayValid}
+              >
                 Next
               </Button>
             </div>
@@ -449,8 +640,8 @@ export default function ApplyPage() {
             {tier && (
               <div className="rounded-md bg-muted p-3 text-sm">
                 Your tier: <strong>{tier.name}</strong> — Max loan:{" "}
-                <strong>R{Number(tier.max_loan).toLocaleString()}</strong> at{" "}
-                <strong>{Number(tier.interest_rate)}% interest</strong>
+                <strong>R{Number(tier.max_loan).toLocaleString()}</strong>. Total cost:{" "}
+                <strong>35%</strong> (admin fee + interest).
               </div>
             )}
             <div className="rounded-md bg-muted p-3 text-sm">
@@ -515,10 +706,37 @@ export default function ApplyPage() {
                 <span className="text-muted-foreground">Repayment Term</span>
                 <span className="font-medium">1 salary cycle</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Interest Rate</span>
-                <span className="font-medium">{tier?.interest_rate ?? 5}%</span>
-              </div>
+              {form.next_pay_date && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Repayment due by</span>
+                  <span className="font-medium">
+                    {new Date(form.next_pay_date + "T12:00:00").toLocaleDateString("en-ZA", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </span>
+                </div>
+              )}
+              {pricing && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Admin fee</span>
+                    <span className="font-medium">R{pricing.adminFee.toFixed(2)}</span>
+                  </div>
+                  {pricing.vatAmount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">VAT</span>
+                      <span className="font-medium">R{pricing.vatAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Interest</span>
+                    <span className="font-medium">R{pricing.interestAmount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between border-t pt-2">
                 <span className="text-muted-foreground">Total Repayment</span>
                 <span className="font-bold">R{totalRepayment.toFixed(2)}</span>
@@ -527,14 +745,22 @@ export default function ApplyPage() {
 
             <div className="space-y-2">
               <p className="font-medium">Documents</p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Badge variant={hasIdDoc ? "default" : "destructive"}>
                   ID {hasIdDoc ? "✓" : "✗"}
                 </Badge>
                 <Badge variant={hasPayslip ? "default" : "destructive"}>
                   Payslip {hasPayslip ? "✓" : "✗"}
                 </Badge>
+                <Badge variant={hasBankStatement ? "default" : "destructive"}>
+                  Bank statement {hasBankStatement ? "✓" : "✗"}
+                </Badge>
               </div>
+              {!canSubmit && (
+                <p className="text-sm text-muted-foreground">
+                  Upload all three documents on step 1 before you can submit.
+                </p>
+              )}
             </div>
 
             {totalRepayment > disposable && disposable > 0 && (
